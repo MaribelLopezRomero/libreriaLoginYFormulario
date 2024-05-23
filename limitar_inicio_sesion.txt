@@ -1,0 +1,120 @@
+CREATE TABLE `login_attempts` (
+  `attempt_id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `username` varchar(32) NOT NULL,
+  `ip_address` varchar(45) NOT NULL,
+  `attempt_time` datetime NOT NULL,
+  PRIMARY KEY (`attempt_id`),
+  KEY `username` (`username`),
+  KEY `ip_address` (`ip_address`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
+
+
+2. registrar los intentos cada vez qu ele usuario inicie sesion
+
+   public function recordLoginAttempt($username, $ipAddress) {
+        $stmt = $this->pdo->prepare('INSERT INTO login_attempts (username, ip_address, attempt_time) VALUES (:username, :ip_address, NOW())');
+        $stmt->execute([
+            ':username' => $username,
+            ':ip_address' => $ipAddress
+        ]);
+    }
+
+    public function countRecentLoginAttempts($username, $ipAddress, $timeFrame = '15 MINUTE') {
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM login_attempts WHERE (username = :username OR ip_address = :ip_address) AND attempt_time > (NOW() - INTERVAL ' . $timeFrame . ')'
+        );
+        $stmt->execute([
+            ':username' => $username,
+            ':ip_address' => $ipAddress
+        ]);
+        return $stmt->fetchColumn();
+    }
+
+    public function clearLoginAttempts($username, $ipAddress) {
+        $stmt = $this->pdo->prepare('DELETE FROM login_attempts WHERE username = :username OR ip_address = :ip_address');
+        $stmt->execute([
+            ':username' => $username,
+            ':ip_address' => $ipAddress
+        ]);
+    }
+
+3.  implementar logica de bloqueo por IP
+
+
+
+
+<class Auth {
+    private $db;
+    private $maxAttempts = 5;  // Máximo número de intentos permitidos
+    private $timeFrame = '15 MINUTE';  // Intervalo de tiempo para contar los intentos
+
+    public function __construct(Database $db) {
+        $this->db = $db;
+    }
+
+    public function canAttemptLogin($username, $ipAddress) {
+        $attempts = $this->db->countRecentLoginAttempts($username, $ipAddress, $this->timeFrame);
+        return $attempts < $this->maxAttempts;
+    }
+
+    public function login($username, $password, $ipAddress) {
+        if (!$this->canAttemptLogin($username, $ipAddress)) {
+            return 'Demasiados intentos fallidos. Intenta nuevamente más tarde.';
+        }
+
+        // Su lógica de autenticación aquí...
+        // Ejemplo:
+        if ($this->authenticate($username, $password)) {
+            $this->db->clearLoginAttempts($username, $ipAddress);  // Restablecer intentos en caso de éxito
+            return 'Inicio de sesión exitoso';
+        } else {
+            $this->db->recordLoginAttempt($username, $ipAddress);
+            return 'Nombre de usuario o contraseña incorrectos.';
+        }
+    }
+
+    private function authenticate($username, $password) {
+        // Su lógica de autenticación real aquí...
+        // Ejemplo:
+        $stmt = $this->db->pdo->prepare('SELECT password FROM users WHERE username = :username');
+        $stmt->execute([':username' => $username]);
+        $hashedPassword = $stmt->fetchColumn();
+        return password_verify($password, $hashedPassword);
+    }
+}
+
+
+
+4. ejemplo uso
+
+
+require 'Database.php';
+require 'Auth.php';
+
+// Configuración de la base de datos
+$dsn = 'mysql:host=localhost;dbname=mi_base_de_datos';
+$dbUser = 'mi_usuario';
+$dbPassword = 'mi_contraseña';
+
+$db = new Database($dsn, $dbUser, $dbPassword);
+$auth = new Auth($db);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $username = $_POST['username'];
+    $password = $_POST['password'];
+    $message = $auth->login($username, $password);
+    echo $message;
+}
+
+
+
+
+
+
+Si un atacante intenta iniciar sesión con nombres de usuario aleatorios, es esencial implementar medidas adicionales para proteger tu aplicación. Aquí hay algunas estrategias efectivas que puedes considerar:
+
+Bloqueo por Dirección IP: Limitar el número de intentos de inicio de sesión por dirección IP.
+ReCAPTCHA: Implementar reCAPTCHA para distinguir entre humanos y bots.
+Registro y Monitoreo: Registrar intentos fallidos y monitorear patrones sospechosos.
+Tiempos de Espera (Throttling): Implementar tiempos de espera progresivos después de múltiples intentos fallidos.
+Notificaciones: Enviar notificaciones de seguridad a los usuarios en caso de múltiples intentos fallidos.
